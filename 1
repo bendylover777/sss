@@ -1,0 +1,220 @@
+import sounddevice as sd
+import numpy as np
+import scipy.io.wavfile as wav
+import speech_recognition as sr
+from deep_translator import GoogleTranslator
+import time, random
+import os
+
+# Система оценки
+class PronunciationGame:
+    def __init__(self):
+        self.score = 0
+        self.rounds_played = 0
+        self.max_rounds = 10
+        self.max_mistakes = 3
+        self.mistakes = 0
+        self.difficulty = None
+
+        # Словари слов по уровням сложности
+        self.words_by_level = {
+            "easy": ["кот", "собака", "яблоко", "молоко", "солнце", "дом", "книга", "стол", "вода", "цветок"],
+            "medium": ["банан", "школа", "друг", "окно", "жёлтый", "машина", "музыка", "погода", "семья", "работа"],
+            "hard": ["технология", "университет", "информация", "произношение", "воображение",
+                    "коммуникация", "организация", "исследование", "развитие", "образование"]
+        }
+
+    def get_difficulty(self):
+        """Выбор уровня сложности"""
+        while True:
+            print("\n🎯 ВЫБЕРИТЕ УРОВЕНЬ СЛОЖНОСТИ:")
+            print("1. Легкий (простые слова) 🌟")
+            print("2. Средний (слова средней сложности) ⚡")
+            print("3. Сложный (сложные слова) 🔥")
+
+            try:
+                choice = input("Ваш выбор (1-3): ").strip()
+                if choice == "1":
+                    self.difficulty = "easy"
+                    return
+                elif choice == "2":
+                    self.difficulty = "medium"
+                    return
+                elif choice == "3":
+                    self.difficulty = "hard"
+                    return
+                else:
+                    print("❌ Пожалуйста, выберите 1, 2 или 3!")
+            except:
+                print("❌ Ошибка ввода! Попробуйте еще раз.")
+
+    def get_random_word(self):
+        """Получить случайное слово для текущего уровня"""
+        if not self.difficulty:
+            return None
+        return random.choice(self.words_by_level[self.difficulty])
+
+    def calculate_similarity(self, user_word, correct_word):
+        """Рассчитать схожесть произношения (простая версия)"""
+        user_word = user_word.lower().strip()
+        correct_word = correct_word.lower().strip()
+
+        # Полное совпадение
+        if user_word == correct_word:
+            return 100
+
+        # Проверяем, содержит ли пользовательское слово правильное слово
+        if correct_word in user_word or user_word in correct_word:
+            return 80
+
+        # Проверяем частичное совпадение
+        common_chars = set(user_word) & set(correct_word)
+        if len(common_chars) >= len(correct_word) * 0.6:
+            return 60
+
+        return 0
+
+    def play_round(self):
+        """Играть один раунд"""
+        word = self.get_random_word()
+        if not word:
+            return False
+
+        print(f"\n🎯 РАУНД {self.rounds_played + 1}/{self.max_rounds}")
+        print("=" * 50)
+        print(f"📝 ЗАГАДАННОЕ СЛОВО: {word.upper()}")
+        print("=" * 50)
+
+        print("🎤 ГОВОРИТЕ СЛОВО...")
+        print("⏰ У вас 3 секунды для записи")
+
+        # Небольшая пауза перед записью
+        time.sleep(1)
+
+        # Запись аудио
+        duration = 3
+        sample_rate = 44100
+        recording = sd.rec(
+            int(duration * sample_rate),
+            samplerate=sample_rate,
+            channels=1,
+            dtype="int16"
+        )
+        sd.wait()
+
+        # Сохранение записи
+        wav.write("output.wav", sample_rate, recording)
+        print("✅ Запись завершена!")
+
+        # Распознавание речи
+        recognizer = sr.Recognizer()
+        try:
+            with sr.AudioFile("output.wav") as source:
+                audio = recognizer.record(source)
+
+            text = recognizer.recognize_google(audio, language="ru-RU")
+            print(f"🎤 Вы сказали: '{text}'")
+
+            # Перевод для проверки
+            translated = GoogleTranslator(source='auto', target='ru').translate(text)
+            print(f"🔄 Распознано как: '{translated}'")
+
+            # Оценка произношения
+            similarity = self.calculate_similarity(translated, word)
+
+            if similarity >= 80:
+                self.score += 10
+                self.rounds_played += 1
+                print("🎉 ОТЛИЧНО! Правильное произношение! +10 очков")
+                print(f"💎 Текущий счет: {self.score}")
+                return True
+            else:
+                self.mistakes += 1
+                print(f"😔 Не совсем правильно. Попробуйте еще раз!")
+                print(f"❌ Ошибки: {self.mistakes}/{self.max_mistakes}")
+                return False
+
+        except sr.UnknownValueError:
+            self.mistakes += 1
+            print("🤷‍♂️ Не удалось распознать речь. Попробуйте говорить четче!")
+            print(f"❌ Ошибки: {self.mistakes}/{self.max_mistakes}")
+            return False
+        except sr.RequestError as e:
+            print(f"🌐 Ошибка сервиса: {e}")
+            print("🔄 Попробуйте еще раз...")
+            return False
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+            return False
+
+    def show_stats(self):
+        """Показать статистику игры"""
+        print("\n" + "="*60)
+        print("📊 СТАТИСТИКА ИГРЫ")
+        print("="*60)
+        print(f"🎯 Сыграно раундов: {self.rounds_played}")
+        print(f"💎 Набрано очков: {self.score}")
+        print(f"❌ Допущено ошибок: {self.mistakes}")
+        print(f"📈 Средний счет за раунд: {self.score/self.rounds_played if self.rounds_played > 0 else 0:.1f}")
+        print("="*60)
+
+    def is_game_over(self):
+        """Проверить, закончилась ли игра"""
+        return self.rounds_played >= self.max_rounds or self.mistakes >= self.max_mistakes
+
+    def get_game_over_message(self):
+        """Получить сообщение об окончании игры"""
+        if self.rounds_played >= self.max_rounds:
+            return "🎉 ПОЗДРАВЛЯЕМ! Вы прошли все раунды!"
+        else:
+            return "💀 ИГРА ОКОНЧЕНА! Слишком много ошибок!"
+
+def main():
+    print("🎤 ИГРА 'ПРОВЕРЬ ПРОИЗНОШЕНИЕ'")
+    print("="*50)
+    print("🎯 Цель: правильно произносите слова на русском языке!")
+    print("📝 Правила:")
+    print("  - Говорите четко и громко")
+    print("  - У вас есть 3 попытки на ошибку")
+    print("  - Максимум 10 раундов")
+    print("  - За правильное произношение +10 очков")
+    print("="*50)
+
+    game = PronunciationGame()
+
+    # Выбор уровня сложности
+    game.get_difficulty()
+
+    print(f"\n🚀 НАЧИНАЕМ ИГРУ! Уровень сложности: {game.difficulty.upper()}")
+    print("🎮 Удачи!\n")
+
+    # Основной игровой цикл
+    while not game.is_game_over():
+        success = game.play_round()
+
+        if not success and game.mistakes < game.max_mistakes:
+            print("🔄 Хотите попробовать это же слово еще раз? (да/нет)")
+            retry = input().lower().strip()
+            if retry in ['да', 'yes', 'д', 'y']:
+                continue
+            else:
+                game.rounds_played += 1
+
+        if game.rounds_played < game.max_rounds:
+            print("\n⏭️  Продолжить игру? (да/нет)")
+            cont = input().lower().strip()
+            if cont not in ['да', 'yes', 'д', 'y']:
+                break
+
+    # Показать финальную статистику
+    game.show_stats()
+    print(f"\n{game.get_game_over_message()}")
+
+    # Очистка
+    if os.path.exists("output.wav"):
+        os.remove("output.wav")
+
+    print("\n👋 Спасибо за игру! До свидания!")
+
+if __name__ == "__main__":
+    main()
